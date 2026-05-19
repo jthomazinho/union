@@ -1,0 +1,15 @@
+[package]
+name = "union-overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Union — transparent always-on-top focus banner overlay"
+repository.workspace = true
+
+[[bin]]
+name = "union-overlay"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+clap = { workspace = true }

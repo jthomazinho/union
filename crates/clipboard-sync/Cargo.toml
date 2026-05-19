@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 arboard = { workspace = true }
+image = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

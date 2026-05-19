@@ -2,17 +2,20 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ClientConfig {
-    /// Server address (hostname or IP).
+    /// Server address (hostname or IP). Ignored if `discover = true`.
+    #[serde(default)]
     pub server_addr: String,
-    /// Server port.
+    /// Server port. Ignored if `discover = true`.
     #[serde(default = "default_port")]
     pub port: u16,
     /// Logical name shown in the server's client list.
     pub hostname: String,
     /// Pre-shared passphrase. Must match the server's.
     pub psk: String,
-    /// Hex-encoded SHA-256 of the server's leaf cert. Obtain on first run by
-    /// reading the server's startup log line; pin in config thereafter.
+    /// Hex-encoded SHA-256 of the server's leaf cert. Optional when
+    /// `discover = true` — the fingerprint is picked up from the mDNS TXT
+    /// record. Required otherwise.
+    #[serde(default)]
     pub server_fingerprint_hex: String,
     /// Max size of clipboard payloads we ourselves originate (server-side
     /// limit is independent).
@@ -22,6 +25,20 @@ pub struct ClientConfig {
     /// anything; defaults to "union-server".
     #[serde(default = "default_sni")]
     pub sni: String,
+    /// If true, ignore `server_addr` / `server_fingerprint_hex` and find the
+    /// server via mDNS (service type `_union._tcp.local.`).
+    #[serde(default)]
+    pub discover: bool,
+    /// Show an OS notification whenever focus arrives at or leaves this client.
+    #[serde(default = "default_true")]
+    pub notify_on_focus: bool,
+    /// Pop a transparent always-on-top banner on each focus arrival.
+    #[serde(default)]
+    pub overlay_on_focus: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_port() -> u16 {

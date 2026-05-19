@@ -1,6 +1,24 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+/// Where a client sits relative to the server's screen. Edge-crossing of the
+/// server's right edge goes to a `Right` client; left edge → `Left`; top
+/// → `Above`; bottom → `Below`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Position {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClientLayout {
+    pub position: Position,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
@@ -20,10 +38,28 @@ pub struct ServerConfig {
     /// notification.
     #[serde(default = "default_clipboard_limit")]
     pub clipboard_limit_bytes: usize,
-    /// Hotkey to cycle focus forward through clients (Ctrl+Alt+Right by
-    /// default — for MVP, edge-crossing detection is future work).
+    /// Hotkey to cycle focus through clients linearly (in connect order).
     #[serde(default)]
     pub hotkey: HotkeyConfig,
+    /// Show an OS notification whenever focus moves to/from a client.
+    #[serde(default = "default_true")]
+    pub notify_on_focus: bool,
+    /// Pop a transparent always-on-top banner ("UNION → hostname") on each
+    /// focus change. Off by default — turn on for stronger visual feedback
+    /// when the OS notification isn't enough.
+    #[serde(default)]
+    pub overlay_on_focus: bool,
+    /// Optional 2D layout keyed by client hostname. Clients without an entry
+    /// default to `right`.
+    ///
+    /// ```toml
+    /// [layout.macbook]
+    /// position = "right"
+    /// [layout.workpc]
+    /// position = "above"
+    /// ```
+    #[serde(default)]
+    pub layout: HashMap<String, ClientLayout>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -58,13 +94,13 @@ fn default_bind() -> String {
     "0.0.0.0".into()
 }
 fn default_cert_dir() -> PathBuf {
-    dirs_home()
-        .join(".config")
-        .join("union")
-        .join("certs")
+    dirs_home().join(".config").join("union").join("certs")
 }
 fn default_clipboard_limit() -> usize {
     clipboard_sync::DEFAULT_LIMIT_BYTES
+}
+fn default_true() -> bool {
+    true
 }
 
 fn dirs_home() -> PathBuf {

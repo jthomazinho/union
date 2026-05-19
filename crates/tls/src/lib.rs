@@ -3,6 +3,8 @@ pub mod cert;
 pub mod psk;
 pub mod transport;
 
-pub use cert::{generate_self_signed, fingerprint_sha256, CertPair};
-pub use psk::{hmac_psk, verify_psk, derive_psk_from_passphrase};
-pub use transport::{client_connect, server_acceptor};
+pub use cert::{fingerprint_sha256, generate_self_signed, CertPair};
+pub use psk::{derive_psk_from_passphrase, hmac_psk, verify_psk};
+pub use transport::{
+    client_connect, client_connect_with_observer, server_acceptor, ObservedFingerprint,
+};

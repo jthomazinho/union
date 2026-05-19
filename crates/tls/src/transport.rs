@@ -1,13 +1,27 @@
 //! Build rustls configs for server and client. The client uses a custom
 //! verifier that pins by SHA-256 of the leaf cert — TOFU semantics.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, Error as RustlsError, ServerConfig, SignatureScheme};
+use rustls::{
+    ClientConfig, DigitallySignedStruct, Error as RustlsError, ServerConfig, SignatureScheme,
+};
 use sha2::{Digest, Sha256};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
+
+/// Snapshot of the last server fingerprint the pinning verifier saw. The
+/// caller reads this after a failed TLS handshake to distinguish a pinning
+/// mismatch (rotate-or-MITM) from a network error.
+#[derive(Clone, Default, Debug)]
+pub struct ObservedFingerprint(Arc<Mutex<Option<[u8; 32]>>>);
+
+impl ObservedFingerprint {
+    pub fn get(&self) -> Option<[u8; 32]> {
+        *self.0.lock().expect("poisoned observed fingerprint mutex")
+    }
+}
 
 fn install_crypto_provider() {
     // Idempotent: first caller wins. Subsequent calls return an error we
@@ -39,6 +53,7 @@ pub fn server_acceptor(cert_pem: &str, key_pem: &str) -> anyhow::Result<TlsAccep
 #[derive(Debug)]
 struct PinnedVerifier {
     fingerprint: [u8; 32],
+    observed: ObservedFingerprint,
 }
 
 impl ServerCertVerifier for PinnedVerifier {
@@ -53,6 +68,7 @@ impl ServerCertVerifier for PinnedVerifier {
         let mut h = Sha256::new();
         h.update(end_entity.as_ref());
         let actual: [u8; 32] = h.finalize().into();
+        *self.observed.0.lock().expect("poisoned observed mutex") = Some(actual);
         if actual == self.fingerprint {
             Ok(ServerCertVerified::assertion())
         } else {
@@ -98,14 +114,27 @@ impl ServerCertVerifier for PinnedVerifier {
 }
 
 pub fn client_connect(expected_fingerprint: [u8; 32]) -> TlsConnector {
+    let (c, _) = client_connect_with_observer(expected_fingerprint);
+    c
+}
+
+/// Same as [`client_connect`], but also returns a handle the caller can poll
+/// after a failed handshake to read what fingerprint the peer actually
+/// presented. Used by the daemon to distinguish a real cert rotation from
+/// a transport-level failure.
+pub fn client_connect_with_observer(
+    expected_fingerprint: [u8; 32],
+) -> (TlsConnector, ObservedFingerprint) {
     install_crypto_provider();
+    let observed = ObservedFingerprint::default();
     let cfg = ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(PinnedVerifier {
             fingerprint: expected_fingerprint,
+            observed: observed.clone(),
         }))
         .with_no_client_auth();
-    TlsConnector::from(Arc::new(cfg))
+    (TlsConnector::from(Arc::new(cfg)), observed)
 }
 
 #[cfg(test)]

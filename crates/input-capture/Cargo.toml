@@ -11,3 +11,4 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 rdev = { version = "0.5", features = ["unstable_grab"] }
+display-info = { workspace = true }

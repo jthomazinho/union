@@ -1,12 +1,21 @@
 port = 24800
-bind = "127.0.0.1"
+bind = "0.0.0.0"
 psk = "test-passphrase"
 cert_dir = "/tmp/union-certs"
 clipboard_limit_bytes = 1048576
+notify_on_focus = true
 
 [hotkey]
-cycle_forward_key = 0x4F
-cycle_backward_key = 0x50
+cycle_forward_key = 0x4F   # right arrow (HID page 0x07)
+cycle_backward_key = 0x50  # left arrow
 require_ctrl = true
 require_alt = true
 require_meta = false
+
+# Optional 2D layout — match clients by their `hostname` config field.
+# Without an entry a client defaults to position = "right".
+#
+# [layout.macbook]
+# position = "right"
+# [layout.workpc]
+# position = "above"

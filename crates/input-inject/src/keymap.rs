@@ -12,7 +12,11 @@ pub fn hid_to_enigo(usage: u16, shift: bool) -> Option<Key> {
         // Letters a..z (HID 0x04..0x1D) → Unicode lower/upper based on shift.
         0x04..=0x1D => {
             let base = (b'a' + (usage - 0x04) as u8) as char;
-            Unicode(if shift { base.to_ascii_uppercase() } else { base })
+            Unicode(if shift {
+                base.to_ascii_uppercase()
+            } else {
+                base
+            })
         }
         // Digits 1..0 top row (HID 0x1E..0x27) → respect shift via OS layout
         // by sending the literal char; OS layouts that produce different

@@ -51,4 +51,8 @@ hex = { workspace = true }
 protocol = { workspace = true }
 union-tls = { workspace = true }
 input-inject = { workspace = true }
+input-capture = { workspace = true }
 clipboard-sync = { workspace = true }
+mdns-sd = { workspace = true }
+notify-rust = { workspace = true }
+union-autostart = { workspace = true }

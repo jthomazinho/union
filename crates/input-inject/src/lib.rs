@@ -7,9 +7,7 @@
 
 mod keymap;
 
-use enigo::{
-    Axis, Button, Coordinate, Direction, Enigo, Keyboard as _, Mouse as _, Settings,
-};
+use enigo::{Axis, Button, Coordinate, Direction, Enigo, Keyboard as _, Mouse as _, Settings};
 use protocol::{KeyCode, Modifiers, MouseButton};
 
 #[derive(Debug, thiserror::Error)]
@@ -28,12 +26,12 @@ pub trait InputInjector {
     fn mouse_move_absolute(&mut self, x: i32, y: i32) -> Result<(), InjectError>;
     fn mouse_button(&mut self, button: MouseButton, pressed: bool) -> Result<(), InjectError>;
     fn mouse_wheel(&mut self, dx: i16, dy: i16) -> Result<(), InjectError>;
-    fn key(
-        &mut self,
-        key: KeyCode,
-        pressed: bool,
-        modifiers: Modifiers,
-    ) -> Result<(), InjectError>;
+    fn key(&mut self, key: KeyCode, pressed: bool, modifiers: Modifiers)
+        -> Result<(), InjectError>;
+    /// Release every modifier we believe to be held. Called on focus change
+    /// and disconnect so a session that died mid-keypress doesn't leave
+    /// the local OS in a "stuck Ctrl" state.
+    fn release_all_modifiers(&mut self) -> Result<(), InjectError>;
 }
 
 pub struct PlatformInjector {
@@ -44,8 +42,8 @@ pub struct PlatformInjector {
 
 impl PlatformInjector {
     pub fn new() -> Result<Self, InjectError> {
-        let enigo = Enigo::new(&Settings::default())
-            .map_err(|e| InjectError::Init(e.to_string()))?;
+        let enigo =
+            Enigo::new(&Settings::default()).map_err(|e| InjectError::Init(e.to_string()))?;
         Ok(Self {
             enigo,
             held: Modifiers::default(),
@@ -64,7 +62,11 @@ impl PlatformInjector {
             if was == now {
                 continue;
             }
-            let dir = if now { Direction::Press } else { Direction::Release };
+            let dir = if now {
+                Direction::Press
+            } else {
+                Direction::Release
+            };
             self.enigo
                 .key(k, dir)
                 .map_err(|e| InjectError::Inject(e.to_string()))?;
@@ -99,7 +101,11 @@ impl InputInjector for PlatformInjector {
                 return Ok(());
             }
         };
-        let dir = if pressed { Direction::Press } else { Direction::Release };
+        let dir = if pressed {
+            Direction::Press
+        } else {
+            Direction::Release
+        };
         self.enigo
             .button(btn, dir)
             .map_err(|e| InjectError::Inject(e.to_string()))
@@ -130,10 +136,18 @@ impl InputInjector for PlatformInjector {
             tracing::debug!("dropping unmapped key 0x{:04x}", key.0);
             return Ok(());
         };
-        let dir = if pressed { Direction::Press } else { Direction::Release };
+        let dir = if pressed {
+            Direction::Press
+        } else {
+            Direction::Release
+        };
         self.enigo
             .key(ek, dir)
             .map_err(|e| InjectError::Inject(e.to_string()))
+    }
+
+    fn release_all_modifiers(&mut self) -> Result<(), InjectError> {
+        self.sync_modifiers(Modifiers::default())
     }
 }
 
@@ -177,6 +191,9 @@ pub enum InjectCmd {
         pressed: bool,
         modifiers: Modifiers,
     },
+    /// Force-release every modifier we believe to be held. Sent on focus
+    /// loss and on session teardown to avoid "stuck Ctrl" after a crash.
+    ReleaseAllModifiers,
 }
 
 fn apply(inj: &mut PlatformInjector, cmd: InjectCmd) -> Result<(), InjectError> {
@@ -185,6 +202,11 @@ fn apply(inj: &mut PlatformInjector, cmd: InjectCmd) -> Result<(), InjectError> 
         InjectCmd::MoveAbs(x, y) => inj.mouse_move_absolute(x, y),
         InjectCmd::Button(b, p) => inj.mouse_button(b, p),
         InjectCmd::Wheel(dx, dy) => inj.mouse_wheel(dx, dy),
-        InjectCmd::Key { key, pressed, modifiers } => inj.key(key, pressed, modifiers),
+        InjectCmd::Key {
+            key,
+            pressed,
+            modifiers,
+        } => inj.key(key, pressed, modifiers),
+        InjectCmd::ReleaseAllModifiers => inj.release_all_modifiers(),
     }
 }

@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use union_tls::psk::{hmac_psk, verify_psk};
 use protocol::{read_message, write_message, Message, ProtoError, PROTOCOL_VERSION};
 use rand::RngCore;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
+use union_tls::psk::{hmac_psk, verify_psk};
 
 #[derive(Debug, thiserror::Error)]
 pub enum HandshakeError {
@@ -21,14 +21,22 @@ pub enum HandshakeError {
     UnexpectedMessage,
 }
 
-/// Run the auth handshake from the server side.
-///
-/// Returns the negotiated hostname on success.
+/// Result of a successful server-side handshake.
+#[derive(Debug, Clone)]
+pub struct HandshakeOk {
+    pub hostname: String,
+    /// The protocol version the peer advertised. Use this to decide whether
+    /// to send v2-only message variants.
+    pub peer_version: u16,
+}
+
+/// Run the auth handshake from the server side. Accepts any peer version in
+/// `[MIN_PROTOCOL_VERSION, PROTOCOL_VERSION]`; newer/older are rejected.
 pub async fn server_handshake<R, W>(
     reader: &mut R,
     writer: &mut W,
     psk: &[u8; 32],
-) -> Result<String, HandshakeError>
+) -> Result<HandshakeOk, HandshakeError>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -41,7 +49,7 @@ where
     else {
         return Err(HandshakeError::UnexpectedMessage);
     };
-    if protocol_version != PROTOCOL_VERSION {
+    if !(protocol::MIN_PROTOCOL_VERSION..=PROTOCOL_VERSION).contains(&protocol_version) {
         return Err(HandshakeError::VersionMismatch {
             got: protocol_version,
             expected: PROTOCOL_VERSION,
@@ -61,8 +69,11 @@ where
         return Err(HandshakeError::AuthFailed);
     }
     write_message(writer, &Message::AuthOk).await?;
-    info!(client = %hostname, "authenticated");
-    Ok(hostname)
+    info!(client = %hostname, peer_version = protocol_version, "authenticated");
+    Ok(HandshakeOk {
+        hostname,
+        peer_version: protocol_version,
+    })
 }
 
 /// Run the auth handshake from the client side.
@@ -118,14 +129,48 @@ where
     })
 }
 
+/// Spawn a task that pushes a `Ping` into `out_tx` every
+/// [`protocol::PING_INTERVAL`]. Stops when the channel closes.
+pub fn spawn_heartbeat(out_tx: mpsc::UnboundedSender<Message>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(protocol::PING_INTERVAL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if out_tx.send(Message::Ping).is_err() {
+                return;
+            }
+        }
+    })
+}
+
+/// Read one frame, bounded by [`protocol::READ_IDLE_TIMEOUT`]. Returns
+/// `Err(ProtoError::PeerClosed)` on timeout so the caller treats it like
+/// any other dead-peer condition.
+pub async fn read_with_idle_timeout<R>(reader: &mut R) -> Result<Message, ProtoError>
+where
+    R: AsyncRead + Unpin,
+{
+    match tokio::time::timeout(protocol::READ_IDLE_TIMEOUT, read_message(reader)).await {
+        Ok(r) => r,
+        Err(_) => {
+            warn!(
+                "no frame received in {:?}; treating peer as dead",
+                protocol::READ_IDLE_TIMEOUT
+            );
+            Err(ProtoError::PeerClosed)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use union_tls::cert::{fingerprint_sha256, generate_self_signed};
-    use union_tls::psk::derive_psk_from_passphrase;
     use rustls::pki_types::ServerName;
     use tokio::io::split;
     use tokio::net::{TcpListener, TcpStream};
+    use union_tls::cert::{fingerprint_sha256, generate_self_signed};
+    use union_tls::psk::derive_psk_from_passphrase;
 
     /// Spin up a real TLS server + TLS client over a localhost socket, run
     /// the full PSK handshake from both sides, then exchange one message.
@@ -137,23 +182,20 @@ mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let acceptor =
-            union_tls::server_acceptor(&pair.cert_pem, &pair.key_pem).unwrap();
+        let acceptor = union_tls::server_acceptor(&pair.cert_pem, &pair.key_pem).unwrap();
 
         let psk_srv = psk;
         let server = tokio::spawn(async move {
             let (sock, _) = listener.accept().await.unwrap();
             let tls = acceptor.accept(sock).await.unwrap();
             let (mut r, mut w) = split(tls);
-            let host = server_handshake(&mut r, &mut w, &psk_srv).await.unwrap();
-            assert_eq!(host, "client-A");
+            let ok = server_handshake(&mut r, &mut w, &psk_srv).await.unwrap();
+            assert_eq!(ok.hostname, "client-A");
+            assert_eq!(ok.peer_version, protocol::PROTOCOL_VERSION);
             // Send an EnterScreen as a smoke message.
-            write_message(
-                &mut w,
-                &Message::EnterScreen { x: 50, y: 100 },
-            )
-            .await
-            .unwrap();
+            write_message(&mut w, &Message::EnterScreen { x: 50, y: 100 })
+                .await
+                .unwrap();
         });
 
         let connector = union_tls::client_connect(fp);
@@ -161,7 +203,9 @@ mod tests {
         let sni = ServerName::try_from("test.local").unwrap();
         let tls = connector.connect(sni, tcp).await.unwrap();
         let (mut r, mut w) = split(tls);
-        client_handshake(&mut r, &mut w, &psk, "client-A").await.unwrap();
+        client_handshake(&mut r, &mut w, &psk, "client-A")
+            .await
+            .unwrap();
 
         let msg = read_message(&mut r).await.unwrap();
         assert!(matches!(msg, Message::EnterScreen { x: 50, y: 100 }));
@@ -174,8 +218,7 @@ mod tests {
         let fp = fingerprint_sha256(&pair.cert_pem).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let acceptor =
-            union_tls::server_acceptor(&pair.cert_pem, &pair.key_pem).unwrap();
+        let acceptor = union_tls::server_acceptor(&pair.cert_pem, &pair.key_pem).unwrap();
         let psk_srv = derive_psk_from_passphrase("correct");
 
         let server = tokio::spawn(async move {
@@ -219,5 +262,43 @@ mod tests {
         let res = server_handshake(&mut br, &mut bw, &psk).await;
         writer.await.unwrap();
         assert!(matches!(res, Err(HandshakeError::VersionMismatch { .. })));
+    }
+
+    /// Older clients (still within the supported window) should be accepted
+    /// and have their version surfaced so the server can downgrade outgoing
+    /// frames.
+    #[tokio::test]
+    async fn legacy_v1_client_accepted() {
+        use tokio::io::duplex;
+        let (mut a, mut b) = duplex(64 * 1024);
+        let psk = derive_psk_from_passphrase("k");
+
+        let psk_clone = psk;
+        let client = tokio::spawn(async move {
+            let (mut ar, mut aw) = split(&mut a);
+            write_message(
+                &mut aw,
+                &Message::Hello {
+                    protocol_version: 1,
+                    hostname: "legacy".into(),
+                },
+            )
+            .await
+            .unwrap();
+            let chal = read_message(&mut ar).await.unwrap();
+            let Message::AuthChallenge { nonce } = chal else {
+                panic!()
+            };
+            let mac = union_tls::psk::hmac_psk(&psk_clone, &nonce);
+            write_message(&mut aw, &Message::AuthResponse { mac })
+                .await
+                .unwrap();
+            let _ok = read_message(&mut ar).await.unwrap();
+        });
+        let (mut br, mut bw) = split(&mut b);
+        let ok = server_handshake(&mut br, &mut bw, &psk).await.unwrap();
+        client.await.unwrap();
+        assert_eq!(ok.hostname, "legacy");
+        assert_eq!(ok.peer_version, 1);
     }
 }

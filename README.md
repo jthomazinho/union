@@ -4,15 +4,22 @@ Software KVM (keyboard/video/mouse) cross-platform — compartilha mouse, teclad
 
 ## Status
 
-**MVP funcional**, validado por testes unitários, testes de integração TLS+PSK end-to-end e smoke test localhost. Não use em produção ainda — falta polimento (auto-reconnect, instaladores, descoberta automática).
+**v0.2 — produto utilizável.** 25 testes verdes (unit + TLS+PSK end-to-end + smoke localhost). Build release zero-warnings em Linux/macOS/Windows. Limitações restantes documentadas abaixo.
 
 ## Arquitetura
 
 - **Server**: roda na máquina dona do teclado/mouse físico. Captura input e roteia ao client em foco.
 - **Client**: roda em cada máquina remota. Recebe eventos e injeta no SO local.
-- Topologia em linha: ciclar foco com `Ctrl+Alt+→` / `Ctrl+Alt+←` (configurável).
-- TLS 1.3 com pinning de fingerprint (TOFU). Autenticação por PSK (HMAC-SHA256 challenge/response).
-- Clipboard texto sincronizado com limite configurável (default 1 MiB); acima do limite trunca preservando borda UTF-8 e notifica.
+- **Multi-monitor**: edge-crossing usa o bounding box do *virtual desktop* (todos os monitores), não apenas o primário.
+- **Layout 2D configurável**: cada client tem `position = "left" | "right" | "above" | "below"` em `server.toml`. Edge-crossing usa as quatro bordas da tela do server; clients sem entrada caem em `right` por default.
+- Clients detectam a borda de saída (espelhada à de entrada) e devolvem o foco automaticamente. Hotkey `Ctrl+Alt+→` / `Ctrl+Alt+←` continua disponível para cycle linear manual.
+- **Indicador de foco**: notificação do SO em cada mudança de foco (configurável via `notify_on_focus`).
+- **TLS 1.3** com pinning de fingerprint (TOFU). Autenticação por **PSK** (HMAC-SHA256 challenge/response), com rate-limit por IP após 3 falhas (backoff exponencial até 5min) e timeout de 10s no handshake.
+- **Heartbeat**: Ping/Pong a cada 10s; sessões sem tráfego por 30s são derrubadas — o client reconnecta com backoff.
+- **Modifiers safety**: ao perder foco ou cair a sessão, o client solta Shift/Ctrl/Alt/Meta no SO local (evita "tecla colada").
+- **Rotação de cert detectável**: quando a fingerprint do server muda, o client grava `pending_fingerprint.txt` com instruções e sai com código 2 (não reconecta silenciosamente contra MITM).
+- Clipboard de texto (default 1 MiB, truncado em UTF-8 + notificação) **e clipboard de imagens comprimido em PNG** na wire (teto de 8 MiB pós-compressão; acima disso descarta + notifica).
+- Discovery opcional via mDNS (`_union._tcp.local.`): o server anuncia porta + fingerprint no TXT; clients com `discover = true` dispensam o passo manual de copiar o hash.
 
 ## Build
 
@@ -42,7 +49,7 @@ Copie esse hash; cada client precisa dele para pinning de cert.
 
 ### 2. Client
 
-Edite `examples/client.toml` com endereço do server e o fingerprint, depois:
+Edite `examples/client.toml` com endereço do server e o fingerprint (ou ative `discover = true` para descoberta via mDNS, dispensando os dois campos), depois:
 
 ```bash
 ./target/release/union-client --config examples/client.toml
@@ -51,10 +58,11 @@ Edite `examples/client.toml` com endereço do server e o fingerprint, depois:
 ### 3. Operação
 
 Com server + 1 ou mais clients conectados:
-- `Ctrl+Alt+→`: foco vai para o próximo client (ou volta para local após o último).
-- `Ctrl+Alt+←`: foco vai para o client anterior.
+- Move o cursor até a borda direita/esquerda da tela do server → foco passa para o próximo/anterior client.
+- Já no client, move até a borda oposta de entrada → foco volta para o server (ou para o client anterior na cadeia).
+- `Ctrl+Alt+→` / `Ctrl+Alt+←`: cycle manual (também volta para local depois do último).
 
-Enquanto remoto, mouse/teclado são capturados localmente e enviados ao client de foco. Clipboard sincroniza nos dois sentidos automaticamente.
+Enquanto remoto, mouse/teclado são capturados no server (o cursor físico fica preso na borda de saída) e os eventos vão para o client de foco. Clipboard de texto e imagem sincroniza nos dois sentidos automaticamente.
 
 ## GUI (egui)
 
@@ -62,7 +70,40 @@ Enquanto remoto, mouse/teclado são capturados localmente e enviados ao client d
 ./target/release/union-gui
 ```
 
-Janela permite alternar entre modo Server/Client, preencher config e iniciar o daemon como subprocesso. **Não validada visualmente nesta sessão** — código compila e o esqueleto está pronto, mas a UX precisa de iteração.
+Painel de controle que:
+
+- Carrega o `server.toml` / `client.toml` existente ao abrir (do diretório de config padrão, `UNION_CONFIG_DIR` se setada).
+- Valida os campos obrigatórios antes de permitir Start (PSK, hostname, fingerprint hex 64 chars — fingerprint dispensado quando `discover` está ligado).
+- Expõe Hotkey (combobox de teclas + checkboxes de modifiers) e Layout 2D (lista editável `hostname↔position`) sem precisar editar TOML.
+- Botão **Test connection** no client tab que faz TCP+TLS+PSK contra o server e mostra OK/erro antes de iniciar o daemon.
+- Spawna o binário do daemon vizinho (`union-server` / `union-client`), reaping em background e tail do stdout/stderr em um buffer rolante de 400 linhas.
+- Painel **Runtime status** lê `~/.config/union/runtime/status.json` (1s polling) e mostra PID, fingerprint, focus atual, clients conectados (hostname/position/screen) e métricas (sessions/focus switches/auth failures/bytes de clipboard).
+- Exibe o fingerprint SHA-256 do cert na aba Server lendo `<cert_dir>/server.crt` direto — sem precisar copiar do log.
+
+## Auto-start
+
+```bash
+./target/release/union-server --config /etc/union/server.toml --install-autostart
+./target/release/union-client --config /etc/union/client.toml --install-autostart
+```
+
+Registra como serviço **per-user** (sem root/admin):
+- **Linux**: unidade systemd em `~/.config/systemd/user/dev.union.{server,client}.service`, com `daemon-reload` + `enable --now`.
+- **macOS**: LaunchAgent em `~/Library/LaunchAgents/dev.union.{server,client}.plist`, com `launchctl bootstrap`.
+- **Windows**: valor sob `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
+Use `--uninstall-autostart` para remover.
+
+## Indicador de foco
+
+Duas opções, configuráveis por TOML/GUI:
+
+- `notify_on_focus = true` (default): notificação do SO via `notify-rust` em cada mudança de foco.
+- `overlay_on_focus = true` (opt-in): banner egui transparente e *mouse-passthrough* aparece no canto superior direito por ~800ms ("UNION → hostname"). Substitui ou complementa a notificação.
+
+## Hot-reload de config
+
+O server faz polling do mtime do TOML a cada 1s. Mudanças em `[layout.X]` e `notify_on_focus` aplicam **sem restart** — clientes já conectados têm o `position` atualizado in-place. Mudanças em `bind/port/psk/cert_dir/hotkey` são detectadas e logam um warning explícito (precisam de restart).
 
 ## Permissões por SO
 
@@ -71,7 +112,7 @@ Janela permite alternar entre modo Server/Client, preencher config e iniciar o d
 - Se quiser persistência da permissão após reinstalar, assine o app com Developer ID.
 
 ### Linux (X11)
-- Funciona out-of-the-box. **Wayland não suportado** — use sessão X11.
+- Funciona out-of-the-box em sessões X11.
 
 ### Windows
 - Funciona, mas low-level hooks não conseguem injetar em janelas elevadas (UAC). Para suporte completo, rode o serviço como administrador.
@@ -105,14 +146,15 @@ Validado em sessão real:
 [server] client connected peer=127.0.0.1:50268 client=smoke-test-client id=1
 ```
 
-## Limitações conhecidas do MVP
+## Limitações conhecidas
 
-1. **Edge crossing automático ausente** — usa hotkey ao invés de detectar cursor cruzando borda da tela. Tarefa para próxima fase (precisa do layout 2D).
-2. **Captura no Windows não consome eventos elevados** — limitação dos low-level hooks fora de privilégio admin.
-3. **rdev pode falhar a primeira invocação no macOS** se Accessibility não estiver concedida; o daemon cai em modo relay-only mas continua aceitando conexões para clipboard.
-4. **Clipboard imagens não suportado** — texto apenas.
-5. **Sem auto-reconnect** — se a conexão cair, o client encerra. Roteador a relançar (systemd/launchd) ou rodar com `while true; do ...; done`.
-6. **GUI não validada visualmente** — egui app compila mas precisa de iteração de UX.
+1. **Captura no Windows não consome eventos elevados** — limitação dos low-level hooks do Win32; rode como administrador para suporte completo.
+2. **rdev pode falhar a primeira invocação no macOS** se Accessibility não estiver concedida; o daemon cai em modo relay-only e segue só com clipboard.
+3. **Layout 2D não suporta chains** — cada `position` admite um client. Múltiplos clients no mesmo eixo precisariam de coordenadas relativas (v0.4).
+4. **Cursor absoluto multi-monitor** — `MoveAbs` do enigo usa coords do display primary; em setup multi-monitor do *client*, o cursor inicial pode aparecer no monitor errado. Edge-crossing entre/dentro de monitores do server funciona.
+5. **Clipboard de imagens descarta payloads >8 MiB pós-PNG** com notificação.
+6. **Drag-and-drop de arquivos** — não implementado; precisaria de hooks nativos por OS (Win32 OLE, NSDragging, XDND). Roadmap v0.4.
+7. **GUI não foi validada visualmente nesta sessão** — compila e a estrutura está pronta (load/save, validação, log tail, fingerprint visível), mas pode precisar de tweaks em uso real.
 
 ## Packaging / Instaladores
 
@@ -159,11 +201,11 @@ choco install wixtoolset
 
 Instala tudo em `C:\Program Files\Union\`, adiciona o diretório ao `PATH` do sistema, cria atalho no Start Menu, instala uma regra de Windows Firewall (TCP 24800, escopo local-subnet) para `union-server.exe` e seedea `%APPDATA%\Union\server.toml` + `client.toml` per-user a partir dos exemplos via componentes MSI advertising (executados na primeira vez que cada usuário entra). O binário do GUI é compilado com `windows_subsystem = "windows"` em release, então não abre console. Detalhes de assinatura em [`packaging/windows/README.md`](packaging/windows/README.md).
 
-## Próximos passos (Phase 2+)
+## Próximos passos (v0.3+)
 
-- Detecção de border crossing com layout 2D
-- mDNS discovery (zeroconf)
-- Drag-and-drop entre máquinas
-- Clipboard de imagens
-- Tray icon + auto-start
-- libei nativo para suporte Wayland
+- Drag-and-drop de arquivos (Win32 OLE / NSDragging / XDND)
+- Layout 2D com chains (múltiplos clients no mesmo eixo + coordenadas relativas)
+- Overlay de foco com janela egui transparente (substitui a notification)
+- Tray icon + auto-start nativo (`launchd` / `systemctl --user` / Windows service)
+- WebP no clipboard de imagem (PNG é lossless mas grande)
+- Lock-screen sync entre máquinas

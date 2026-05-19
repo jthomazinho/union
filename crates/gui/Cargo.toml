@@ -35,6 +35,7 @@ path-guid = "B5B3D5C7-7A1E-4F38-8E5E-1F7E8C2C8B22"
 [dependencies]
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "persistence"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 toml = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
@@ -42,3 +43,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 protocol = { workspace = true }
 clipboard-sync = { workspace = true }
+union-tls = { workspace = true }
