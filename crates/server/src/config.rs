@@ -49,6 +49,10 @@ pub struct ServerConfig {
     /// when the OS notification isn't enough.
     #[serde(default)]
     pub overlay_on_focus: bool,
+    /// When the local screen locks, force focus back to the server. Prevents
+    /// typing the lock-screen password into a remote machine by mistake.
+    #[serde(default = "default_true")]
+    pub release_focus_on_lock: bool,
     /// Optional 2D layout keyed by client hostname. Clients without an entry
     /// default to `right`.
     ///

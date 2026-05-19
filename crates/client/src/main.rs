@@ -128,6 +128,9 @@ async fn main() -> anyhow::Result<()> {
         session_state.clone(),
         bounds,
     );
+    if cfg.release_focus_on_lock {
+        spawn_lock_watcher(session_state.clone());
+    }
 
     let mut backoff = BACKOFF_MIN;
     loop {
@@ -207,6 +210,33 @@ impl SessionState {
             }),
         }
     }
+}
+
+/// When the local screen locks, ask the server to take focus back. Only
+/// meaningful while we're actively being controlled; otherwise the request
+/// is sent but the server already has focus.
+fn spawn_lock_watcher(state: Arc<SessionState>) {
+    let (tx, mut rx) = mpsc::unbounded_channel::<union_lock_watch::LockState>();
+    if let Err(e) = union_lock_watch::spawn(move |s| {
+        let _ = tx.send(s);
+    }) {
+        warn!("lock-watch failed to start: {e}");
+        return;
+    }
+    tokio::spawn(async move {
+        while let Some(s) = rx.recv().await {
+            if !matches!(s, union_lock_watch::LockState::Locked) {
+                continue;
+            }
+            let inner = state.inner.lock().await;
+            if let Some(out) = &inner.request_return {
+                if inner.focused {
+                    info!("screen locked — releasing focus to server");
+                    let _ = out.send(Message::RequestFocusReturn);
+                }
+            }
+        }
+    });
 }
 
 fn spawn_edge_watcher(

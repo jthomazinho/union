@@ -35,6 +35,10 @@ pub struct ClientConfig {
     /// Pop a transparent always-on-top banner on each focus arrival.
     #[serde(default)]
     pub overlay_on_focus: bool,
+    /// When this machine's screen locks, ask the server to take focus back.
+    /// Useful so password entry doesn't end up on a different host.
+    #[serde(default = "default_true")]
+    pub release_focus_on_lock: bool,
 }
 
 fn default_true() -> bool {

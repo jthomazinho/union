@@ -105,6 +105,17 @@ Duas opções, configuráveis por TOML/GUI:
 
 O server faz polling do mtime do TOML a cada 1s. Mudanças em `[layout.X]` e `notify_on_focus` aplicam **sem restart** — clientes já conectados têm o `position` atualizado in-place. Mudanças em `bind/port/psk/cert_dir/hotkey` são detectadas e logam um warning explícito (precisam de restart).
 
+## Lock-screen sync
+
+Quando o seu screen trava (Ctrl+Cmd+Q / Win+L / dbus session lock), o foco volta automaticamente pra máquina local — evita digitar senha no host errado. Configurável via `release_focus_on_lock` (default `true`) em ambos os TOMLs.
+
+Detecção:
+- **Linux**: `loginctl show-session self -p LockedHint` (systemd ≥ 240).
+- **macOS**: `CGSessionCopyCurrentDictionary` + `CGSSessionScreenIsLocked` via FFI.
+- **Windows**: `OpenInputDesktop(DESKTOP_SWITCHDESKTOP)` — falha quando o secure desktop (lock screen) está ativo.
+
+Polling de 2s, sem deps pesadas além de `windows-sys` (apenas no target Windows).
+
 ## Envio de arquivos (`union-send`)
 
 ```bash

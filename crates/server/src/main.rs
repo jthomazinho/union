@@ -165,6 +165,26 @@ async fn main() -> anyhow::Result<()> {
     );
     NOTIFY_FOCUS.store(cfg.notify_on_focus, std::sync::atomic::Ordering::Release);
     OVERLAY_FOCUS.store(cfg.overlay_on_focus, std::sync::atomic::Ordering::Release);
+
+    if cfg.release_focus_on_lock {
+        let (lock_tx, mut lock_rx) =
+            tokio::sync::mpsc::unbounded_channel::<union_lock_watch::LockState>();
+        if let Err(e) = union_lock_watch::spawn(move |s| {
+            let _ = lock_tx.send(s);
+        }) {
+            warn!("lock-watch failed to start: {e}");
+        }
+        let state_lock = state.clone();
+        let control_lock = capture_control.clone();
+        tokio::spawn(async move {
+            while let Some(s) = lock_rx.recv().await {
+                if matches!(s, union_lock_watch::LockState::Locked) {
+                    info!("screen locked — forcing focus back to local");
+                    return_to_local(&state_lock, &control_lock).await;
+                }
+            }
+        });
+    }
     let state_cap = state.clone();
     let cfg_cap = cfg.clone();
     let control_for_loop = capture_control.clone();
