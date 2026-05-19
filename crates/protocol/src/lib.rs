@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 /// Oldest peer protocol version this build still accepts. Clients <
 /// MIN_PROTOCOL_VERSION are rejected with a `VersionMismatch`. Newer ones
 /// downgrade gracefully — the server simply withholds variants that didn't
@@ -20,6 +20,10 @@ pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const CLIPBOARD_CHUNK_BYTES: usize = 32 * 1024;
 /// Hard ceiling on image clipboard payloads (RGBA8); above this we drop and notify.
 pub const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+/// Per-file ceiling for `FileTransferOffer`. Above this we reject the offer.
+pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+/// Wire chunk size for file transfer payloads (same as clipboard for now).
+pub const FILE_CHUNK_BYTES: usize = 32 * 1024;
 
 // Heartbeat: each side emits a Ping at this cadence, expects any frame
 // (Pong, MouseMove, etc.) within READ_IDLE_TIMEOUT, else assumes the peer
@@ -164,6 +168,38 @@ pub enum Message {
     /// Client → server: cursor reached the configured exit edge; please pop
     /// focus back to the server (or to the next client in the chain).
     RequestFocusReturn,
+
+    // ---- v3 additions: file transfer ----
+    /// Source → receiver: a file is about to be streamed. `id` keys the
+    /// upcoming chunks. The receiver may answer `FileTransferReject`; on
+    /// silence it's an implicit accept.
+    FileTransferOffer {
+        id: u32,
+        name: String,
+        size: u64,
+        total_chunks: u32,
+    },
+    /// Source → receiver: one chunk of a file. Chunks arrive in order; the
+    /// receiver writes them to disk as they come, validating final SHA-256
+    /// against the trailing `FileTransferDone`.
+    FileTransferChunk {
+        id: u32,
+        chunk_index: u32,
+        data: Vec<u8>,
+    },
+    /// Source → receiver: payload finished; expected hash over the assembled
+    /// bytes. Receiver compares and finalizes (rename .part → final) or
+    /// discards the partial file on mismatch.
+    FileTransferDone {
+        id: u32,
+        sha256: [u8; 32],
+    },
+    /// Receiver → source: payload refused (too big, disk full, unknown
+    /// reason). `reason` is human-readable for logs only.
+    FileTransferReject {
+        id: u32,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Error)]

@@ -14,6 +14,7 @@ use input_capture::{start_capture, CaptureControl, CaptureEvent, HotkeyMatch};
 use input_inject::{spawn_injector_thread, InjectCmd};
 use protocol::{Edge, Message};
 use rustls::pki_types::ServerName;
+use sha2::{Digest, Sha256};
 use tokio::io::split;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
@@ -306,6 +307,8 @@ async fn run_session(
     });
 
     let mut reassembler: Option<([u8; 32], Reassembler)> = None;
+    let mut file_transfers: std::collections::HashMap<u32, FileReceive> =
+        std::collections::HashMap::new();
     let result: anyhow::Result<()> = async {
         loop {
             let msg = session::read_with_idle_timeout(&mut reader).await?;
@@ -406,6 +409,73 @@ async fn run_session(
                 Message::Ping => {
                     let _ = out_tx.send(Message::Pong);
                 }
+                Message::FileTransferOffer {
+                    id,
+                    name,
+                    size,
+                    total_chunks,
+                } => {
+                    if size > protocol::MAX_FILE_BYTES {
+                        warn!(
+                            "rejecting file '{name}' ({size} B exceeds {})",
+                            protocol::MAX_FILE_BYTES
+                        );
+                        let _ = out_tx.send(Message::FileTransferReject {
+                            id,
+                            reason: format!("size {size} > max {}", protocol::MAX_FILE_BYTES),
+                        });
+                        continue;
+                    }
+                    match FileReceive::begin(id, &name, total_chunks) {
+                        Ok(fr) => {
+                            info!("accepting file '{name}' → {}", fr.path.display());
+                            file_transfers.insert(id, fr);
+                        }
+                        Err(e) => {
+                            warn!("failed to open file for '{name}': {e}");
+                            let _ = out_tx.send(Message::FileTransferReject {
+                                id,
+                                reason: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                Message::FileTransferChunk {
+                    id,
+                    chunk_index,
+                    data,
+                } => {
+                    if let Some(fr) = file_transfers.get_mut(&id) {
+                        if let Err(e) = fr.write_chunk(chunk_index, &data) {
+                            warn!("file '{}' chunk {chunk_index} write failed: {e}", fr.name);
+                            file_transfers.remove(&id);
+                        }
+                    }
+                }
+                Message::FileTransferDone { id, sha256 } => {
+                    if let Some(fr) = file_transfers.remove(&id) {
+                        match fr.finalize(sha256) {
+                            Ok(final_path) => {
+                                info!("file saved: {}", final_path.display());
+                                if cfg.notify_on_focus {
+                                    notify_focus_change(&format!(
+                                        "Arquivo recebido: {}",
+                                        final_path
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("?")
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                warn!("file finalize failed: {e}");
+                            }
+                        }
+                    }
+                }
+                Message::FileTransferReject { id, reason } => {
+                    tracing::debug!("server rejected file transfer {id}: {reason}");
+                }
                 other => {
                     tracing::trace!("ignoring {other:?}");
                 }
@@ -472,6 +542,139 @@ async fn discover_server(timeout: Duration) -> anyhow::Result<Discovered> {
     };
     let _ = daemon.shutdown();
     result
+}
+
+/// State for a file currently being received. Writes chunks to a `.part`
+/// sibling, hashing as we go; renames to the final name on `Done` if the
+/// hash matches.
+struct FileReceive {
+    name: String,
+    path: PathBuf,
+    part_path: PathBuf,
+    file: std::fs::File,
+    hasher: Sha256,
+    next_chunk_expected: u32,
+    total_chunks: u32,
+}
+
+impl FileReceive {
+    fn begin(_id: u32, name: &str, total_chunks: u32) -> std::io::Result<Self> {
+        let dir = downloads_dir().join("union-incoming");
+        std::fs::create_dir_all(&dir)?;
+        let safe = sanitize_filename(name);
+        let path = unique_path(&dir, &safe);
+        let part_path = path.with_extension(format!(
+            "{}.part",
+            path.extension().and_then(|s| s.to_str()).unwrap_or("")
+        ));
+        let file = std::fs::File::create(&part_path)?;
+        Ok(Self {
+            name: name.to_string(),
+            path,
+            part_path,
+            file,
+            hasher: Sha256::new(),
+            next_chunk_expected: 0,
+            total_chunks,
+        })
+    }
+
+    fn write_chunk(&mut self, index: u32, data: &[u8]) -> std::io::Result<()> {
+        if index != self.next_chunk_expected {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "out-of-order chunk: got {index} expected {}",
+                    self.next_chunk_expected
+                ),
+            ));
+        }
+        use sha2::Digest;
+        use std::io::Write;
+        self.file.write_all(data)?;
+        self.hasher.update(data);
+        self.next_chunk_expected += 1;
+        Ok(())
+    }
+
+    fn finalize(mut self, expected: [u8; 32]) -> std::io::Result<PathBuf> {
+        use sha2::Digest;
+        use std::io::Write;
+        self.file.flush()?;
+        drop(self.file);
+        let actual: [u8; 32] = self.hasher.finalize().into();
+        if actual != expected {
+            let _ = std::fs::remove_file(&self.part_path);
+            return Err(std::io::Error::other(format!(
+                "sha256 mismatch on '{}': dropped {} bytes already on disk",
+                self.name, self.next_chunk_expected
+            )));
+        }
+        if self.next_chunk_expected != self.total_chunks {
+            tracing::warn!(
+                "file '{}' done but received {}/{} chunks; saving anyway",
+                self.name,
+                self.next_chunk_expected,
+                self.total_chunks
+            );
+        }
+        std::fs::rename(&self.part_path, &self.path)?;
+        Ok(self.path)
+    }
+}
+
+fn downloads_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("UNION_INCOMING_DIR") {
+        return PathBuf::from(d);
+    }
+    if cfg!(target_os = "windows") {
+        if let Some(p) = std::env::var_os("USERPROFILE") {
+            return PathBuf::from(p).join("Downloads");
+        }
+    }
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join("Downloads"))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Strip path separators and a handful of OS-illegal characters so a
+/// malicious peer can't write outside the downloads dir or clobber system
+/// files. Empty/dotted names become "untitled".
+fn sanitize_filename(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                '/' | '\\' | '\0' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+            )
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.');
+    if trimmed.is_empty() {
+        "untitled".into()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Return `dir/name`, or `dir/name (n)` if that already exists.
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (name.to_string(), String::new()),
+    };
+    for i in 1..1000 {
+        let p = dir.join(format!("{stem} ({i}){ext}"));
+        if !p.exists() {
+            return p;
+        }
+    }
+    dir.join(format!("{stem}.{}{ext}", std::process::id()))
 }
 
 /// Fire-and-forget OS notification so the user sees the focus change even

@@ -12,6 +12,7 @@ members = [
     "crates/client",
     "crates/gui",
     "crates/overlay",
+    "crates/send-tool",
 ]
 
 [workspace.package]

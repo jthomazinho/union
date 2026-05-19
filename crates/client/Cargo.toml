@@ -56,3 +56,4 @@ clipboard-sync = { workspace = true }
 mdns-sd = { workspace = true }
 notify-rust = { workspace = true }
 union-autostart = { workspace = true }
+sha2 = { workspace = true }

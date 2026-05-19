@@ -102,6 +102,17 @@ fn is_v2_only(msg: &Message) -> bool {
     )
 }
 
+/// Variants introduced in protocol v3 (file transfer).
+fn is_v3_only(msg: &Message) -> bool {
+    matches!(
+        msg,
+        Message::FileTransferOffer { .. }
+            | Message::FileTransferChunk { .. }
+            | Message::FileTransferDone { .. }
+            | Message::FileTransferReject { .. }
+    )
+}
+
 impl ConnectedClient {
     /// Send a frame to this client, dropping variants the peer is too old
     /// to decode.
@@ -110,6 +121,14 @@ impl ConnectedClient {
             tracing::trace!(
                 client = %self.hostname,
                 "dropping v2-only frame for v{} peer",
+                self.proto_version,
+            );
+            return;
+        }
+        if self.proto_version < 3 && is_v3_only(&msg) {
+            tracing::trace!(
+                client = %self.hostname,
+                "dropping v3-only frame for v{} peer",
                 self.proto_version,
             );
             return;

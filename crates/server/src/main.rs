@@ -1,6 +1,7 @@
 mod auth_throttle;
 mod cert_store;
 mod config;
+mod ipc;
 mod metrics;
 mod reload;
 mod state;
@@ -182,8 +183,16 @@ async fn main() -> anyhow::Result<()> {
     let bind_addr = format!("{}:{}", cfg.bind, cfg.port);
     let listener = TcpListener::bind(&bind_addr).await?;
     info!("listening on {bind_addr}");
-    let _status_writer =
-        status::spawn_writer(state.clone(), fp_hex.clone(), bind_addr.clone(), bounds);
+    let ipc_token = ipc::random_token();
+    let ipc_handle = ipc::spawn(state.clone(), ipc_token).await.ok();
+    let _status_writer = status::spawn_writer(
+        state.clone(),
+        fp_hex.clone(),
+        bind_addr.clone(),
+        bounds,
+        ipc_handle.as_ref().map(|h| h.addr.clone()),
+        ipc_token,
+    );
     loop {
         let (sock, peer) = match listener.accept().await {
             Ok(s) => s,

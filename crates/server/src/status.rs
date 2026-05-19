@@ -25,6 +25,12 @@ struct StatusSnapshot {
     focus: FocusSnapshot,
     clients: Vec<ClientSnapshot>,
     metrics: metrics::Snapshot,
+    /// `127.0.0.1:port` for `union-send` to connect to. `None` if IPC failed
+    /// to bind at startup.
+    ipc_addr: Option<String>,
+    /// 64-hex per-startup random token; helpers must present this in the
+    /// IPC Hello before the daemon will accept commands.
+    ipc_token: String,
 }
 
 #[derive(Serialize)]
@@ -74,6 +80,8 @@ pub fn spawn_writer(
     fingerprint_hex: String,
     listening_on: String,
     bounds: input_capture::VirtualBounds,
+    ipc_addr: Option<String>,
+    ipc_token: [u8; 32],
 ) -> tokio::task::JoinHandle<()> {
     let path = status_path();
     if let Some(parent) = path.parent() {
@@ -81,16 +89,35 @@ pub fn spawn_writer(
     }
     let pid = std::process::id();
     let state = Arc::new(state);
+    let token_hex = hex_encode(&ipc_token);
     tokio::spawn(async move {
         let mut ticker = interval(WRITE_INTERVAL);
         loop {
             ticker.tick().await;
-            let snap = build_snapshot(&state, &fingerprint_hex, &listening_on, bounds, pid).await;
+            let snap = build_snapshot(
+                &state,
+                &fingerprint_hex,
+                &listening_on,
+                bounds,
+                pid,
+                ipc_addr.clone(),
+                token_hex.clone(),
+            )
+            .await;
             if let Err(e) = write_atomic(&path, &snap) {
                 tracing::debug!("status write failed: {e}");
             }
         }
     })
+}
+
+fn hex_encode(b: &[u8]) -> String {
+    let mut s = String::with_capacity(b.len() * 2);
+    for byte in b {
+        use std::fmt::Write;
+        let _ = write!(s, "{byte:02x}");
+    }
+    s
 }
 
 async fn build_snapshot(
@@ -99,6 +126,8 @@ async fn build_snapshot(
     listening_on: &str,
     bounds: input_capture::VirtualBounds,
     pid: u32,
+    ipc_addr: Option<String>,
+    ipc_token: String,
 ) -> StatusSnapshot {
     let st = state.0.lock().await;
     let clients: Vec<ClientSnapshot> = st
@@ -131,6 +160,8 @@ async fn build_snapshot(
         focus,
         clients,
         metrics: metrics::snapshot(),
+        ipc_addr,
+        ipc_token,
     }
 }
 

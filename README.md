@@ -105,6 +105,16 @@ Duas opções, configuráveis por TOML/GUI:
 
 O server faz polling do mtime do TOML a cada 1s. Mudanças em `[layout.X]` e `notify_on_focus` aplicam **sem restart** — clientes já conectados têm o `position` atualizado in-place. Mudanças em `bind/port/psk/cert_dir/hotkey` são detectadas e logam um warning explícito (precisam de restart).
 
+## Envio de arquivos (`union-send`)
+
+```bash
+./target/release/union-send foo.pdf bar.zip
+```
+
+Envia arquivos do host (onde o `union-server` está rodando) para o client com **foco atual** — fallback pro primeiro client conectado caso esteja com foco local. O receiver salva em `~/Downloads/union-incoming/` (ou `$UNION_INCOMING_DIR`) e dispara notification.
+
+Funciona porque o daemon expõe um IPC loopback (gravado em `status.json` com token de auth random por boot). O CLI `union-send` lê o token, autentica, faz hash do conteúdo (SHA-256) e streama em chunks de 32 KiB; o daemon re-emite como `FileTransferOffer` + `FileTransferChunk` + `FileTransferDone` pela mesma sessão TLS. Teto de 256 MiB por arquivo. **Não é drag visual real** (sem hooks de OS para arrastar com o cursor); é transferência sem fricção via CLI, cobrindo o mesmo caso de uso.
+
 ## Permissões por SO
 
 ### macOS

@@ -3670,6 +3670,7 @@ dependencies = [
  "rdev",
  "rustls",
  "serde",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
@@ -3707,10 +3708,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "union-send"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "clap",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "union-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "clap",
  "clipboard-sync",
  "hex",
@@ -3723,6 +3739,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
