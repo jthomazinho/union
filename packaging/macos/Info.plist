@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Union</string>
+    <key>CFBundleExecutable</key>
+    <string>union</string>
+    <key>CFBundleIconFile</key>
+    <string>union.icns</string>
+    <key>CFBundleIdentifier</key>
+    <string>dev.union.kvm</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Union</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__VERSION__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Union needs access to system events to forward keyboard and mouse input to remote machines.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Union captures keyboard and mouse input to forward it to remote machines you select.</string>
+    <key>LSUIElement</key>
+    <false/>
+</dict>
+</plist>

@@ -1,0 +1,16 @@
+[Unit]
+Description=Union software KVM server
+Documentation=https://github.com/local/union
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Seed a per-user config on first start if one doesn't already exist.
+ExecStartPre=/bin/sh -c 'test -f "%h/.config/union/server.toml" || { mkdir -p "%h/.config/union" && install -m 600 /etc/union/server.toml.example "%h/.config/union/server.toml"; }'
+ExecStart=/usr/bin/union-server --config %h/.config/union/server.toml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

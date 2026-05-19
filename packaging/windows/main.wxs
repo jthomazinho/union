@@ -1,0 +1,209 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Union — WiX installer source for union-server, union-client and union-gui.
+  Built via `cargo wix --package union-gui -i packaging/windows/main.wxs`.
+  Compiled by candle.exe / linked by light.exe (WiX Toolset v3).
+-->
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'
+     xmlns:fire='http://schemas.microsoft.com/wix/FirewallExtension'>
+    <Product
+        Id='*'
+        Name='Union'
+        UpgradeCode='9F7E0E3B-3A52-4D5D-9C2E-7C9C0E9A1A11'
+        Manufacturer='Union Project'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package
+            Id='*'
+            Keywords='Installer'
+            Description='Union — software KVM (keyboard/mouse/clipboard sharing)'
+            Manufacturer='Union Project'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perMachine'
+            SummaryCodepage='1252' />
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of Union is already installed.' />
+
+        <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' />
+
+        <Property Id='DiskPrompt' Value='Union Installation' />
+        <Property Id='ARPHELPLINK' Value='https://github.com/local/union' />
+        <Property Id='ARPNOMODIFY' Value='1' />
+        <Property Id='ARPNOREPAIR' Value='1' />
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='ProgramFiles64Folder'>
+                <Directory Id='APPLICATIONFOLDER' Name='Union'>
+                    <Component Id='CmpUnionGui' Guid='B5B3D5C7-7A1E-4F38-8E5E-1F7E8C2C8B22' Win64='yes'>
+                        <File
+                            Id='FileUnionGui'
+                            Name='union-gui.exe'
+                            Source='target\release\union-gui.exe'
+                            KeyPath='yes' />
+                    </Component>
+                    <Component Id='CmpUnionServer' Guid='3D2C9A4E-6BAB-4F61-9B12-2E0C3F45F1A7' Win64='yes'>
+                        <File
+                            Id='FileUnionServer'
+                            Name='union-server.exe'
+                            Source='target\release\union-server.exe'
+                            KeyPath='yes'>
+                            <fire:FirewallException
+                                Id='UnionServerFwTcp'
+                                Name='Union Server (TCP)'
+                                Description='Union software KVM server inbound TLS connections'
+                                Protocol='tcp'
+                                Port='24800'
+                                Scope='localSubnet'
+                                IgnoreFailure='yes' />
+                        </File>
+                    </Component>
+                    <Component Id='CmpUnionClient' Guid='7E26B9D8-1A4F-4C90-8C24-9D6B8F8AAE34' Win64='yes'>
+                        <File
+                            Id='FileUnionClient'
+                            Name='union-client.exe'
+                            Source='target\release\union-client.exe'
+                            KeyPath='yes' />
+                    </Component>
+                    <Component Id='CmpLicense' Guid='F1B3E48A-4D6C-4B92-9D9C-5E1A6C2E7B0D' Win64='yes'>
+                        <File
+                            Id='FileLicense'
+                            Name='LICENSE.txt'
+                            Source='LICENSE'
+                            KeyPath='yes' />
+                    </Component>
+                    <Component Id='CmpReadme' Guid='6A8C0F25-1D49-4A5C-86C7-9E14D6C5C7B2' Win64='yes'>
+                        <File
+                            Id='FileReadme'
+                            Name='README.md'
+                            Source='README.md'
+                            KeyPath='yes' />
+                    </Component>
+                    <Component Id='CmpServerExample' Guid='2C5E7D9F-3A8B-4F1E-9D6A-4B0E8F1C9D3A' Win64='yes'>
+                        <File
+                            Id='FileServerExample'
+                            Name='server.toml.example'
+                            Source='examples\server.toml'
+                            KeyPath='yes' />
+                    </Component>
+                    <Component Id='CmpClientExample' Guid='8B1A4F6D-9E2C-4A38-B7C5-1F2D3E4A5B6C' Win64='yes'>
+                        <File
+                            Id='FileClientExample'
+                            Name='client.toml.example'
+                            Source='examples\client.toml'
+                            KeyPath='yes' />
+                    </Component>
+                    <Component Id='CmpPath' Guid='4E5F6A7B-8C9D-4E1F-A2B3-C4D5E6F7A8B9' Win64='yes' KeyPath='yes'>
+                        <Environment
+                            Id='PathEntry'
+                            Name='PATH'
+                            Value='[APPLICATIONFOLDER]'
+                            Permanent='no'
+                            Part='last'
+                            Action='set'
+                            System='yes' />
+                    </Component>
+                </Directory>
+            </Directory>
+
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='Union'>
+                    <Component Id='CmpStartMenuShortcut' Guid='1B2C3D4E-5F6A-4B8C-9D0E-1F2A3B4C5D6E'>
+                        <Shortcut
+                            Id='UnionGuiShortcut'
+                            Name='Union'
+                            Description='Open the Union control panel'
+                            Target='[APPLICATIONFOLDER]union-gui.exe'
+                            WorkingDirectory='APPLICATIONFOLDER' />
+                        <RemoveFolder Id='RemoveApplicationProgramsFolder' On='uninstall' />
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\Union\Installed'
+                            Name='startmenu'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes' />
+                    </Component>
+                </Directory>
+            </Directory>
+
+            <!-- Per-user config directory: seed example configs into %APPDATA%\Union\ on first
+                 install for each user, removed on uninstall.  Components use an HKCU key path
+                 so MSI runs them per user (advertising). -->
+            <Directory Id='AppDataFolder'>
+                <Directory Id='UnionUserConfigDir' Name='Union'>
+                    <Component Id='CmpUserConfigServer' Guid='A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D'>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\Union\PerUser'
+                            Name='server'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes' />
+                        <CopyFile
+                            Id='SeedServerConfig'
+                            FileId='FileServerExample'
+                            DestinationDirectory='UnionUserConfigDir'
+                            DestinationName='server.toml' />
+                        <RemoveFile
+                            Id='RemoveServerConfig'
+                            Name='server.toml'
+                            On='uninstall' />
+                        <RemoveFolder
+                            Id='RemoveUserConfigDir1'
+                            On='uninstall' />
+                    </Component>
+                    <Component Id='CmpUserConfigClient' Guid='B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6F'>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\Union\PerUser'
+                            Name='client'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes' />
+                        <CopyFile
+                            Id='SeedClientConfig'
+                            FileId='FileClientExample'
+                            DestinationDirectory='UnionUserConfigDir'
+                            DestinationName='client.toml' />
+                        <RemoveFile
+                            Id='RemoveClientConfig'
+                            Name='client.toml'
+                            On='uninstall' />
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <Feature Id='Complete' Title='Union' Level='1'
+                 Description='Union software KVM — server, client, GUI control panel.'
+                 ConfigurableDirectory='APPLICATIONFOLDER'
+                 AllowAdvertise='no' Display='expand' Absent='disallow'>
+            <ComponentRef Id='CmpUnionGui' />
+            <ComponentRef Id='CmpUnionServer' />
+            <ComponentRef Id='CmpUnionClient' />
+            <ComponentRef Id='CmpLicense' />
+            <ComponentRef Id='CmpReadme' />
+            <ComponentRef Id='CmpServerExample' />
+            <ComponentRef Id='CmpClientExample' />
+            <ComponentRef Id='CmpPath' />
+            <ComponentRef Id='CmpStartMenuShortcut' />
+            <ComponentRef Id='CmpUserConfigServer' />
+            <ComponentRef Id='CmpUserConfigClient' />
+        </Feature>
+
+        <Icon Id='UnionIcon' SourceFile='packaging\windows\union.ico' />
+        <Property Id='ARPPRODUCTICON' Value='UnionIcon' />
+
+        <WixVariable Id='WixUILicenseRtf' Value='packaging\windows\license.rtf' />
+
+        <UI>
+            <UIRef Id='WixUI_FeatureTree' />
+        </UI>
+    </Product>
+</Wix>

@@ -1,0 +1,55 @@
+[package]
+name = "union-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Union — software KVM server daemon (keyboard/mouse/clipboard sharing)"
+repository.workspace = true
+
+[[bin]]
+name = "union-server"
+path = "src/main.rs"
+
+[package.metadata.deb]
+maintainer = "Union Project"
+copyright = "2026, Union Project"
+license-file = ["../../LICENSE", "0"]
+extended-description = """Server daemon for Union, a cross-platform software KVM. \
+Runs on the machine that owns the physical keyboard and mouse, capturing input \
+and routing it to remote clients over TLS 1.3 with PSK authentication."""
+depends = "$auto, libx11-6, libxi6, libxtst6"
+section = "net"
+priority = "optional"
+maintainer-scripts = "../../packaging/linux/maintainer-scripts"
+assets = [
+    ["target/release/union-server", "usr/bin/", "755"],
+    ["../../examples/server.toml", "etc/union/server.toml.example", "644"],
+    ["../../README.md", "usr/share/doc/union-server/README.md", "644"],
+    ["../../packaging/linux/union-server.service", "lib/systemd/user/union-server.service", "644"],
+]
+conf-files = ["/etc/union/server.toml.example"]
+
+[package.metadata.deb.systemd-units]
+unit-scripts = "../../packaging/linux"
+enable = false
+start = false
+
+[dependencies]
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+protocol = { workspace = true }
+union-tls = { workspace = true }
+union-session = { workspace = true }
+input-capture = { workspace = true }
+input-inject = { workspace = true }
+clipboard-sync = { workspace = true }

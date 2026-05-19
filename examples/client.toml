@@ -1,0 +1,7 @@
+server_addr = "127.0.0.1"
+port = 24800
+hostname = "smoke-test-client"
+psk = "test-passphrase"
+server_fingerprint_hex = "e57cef361aa393311bfa64c1fe50da09c56263e641e22875090e668ddc4ece86"
+clipboard_limit_bytes = 1048576
+sni = "union-server"

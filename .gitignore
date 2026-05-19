@@ -1,0 +1,12 @@
+/target
+/dist
+**/*.rs.bk
+Cargo.lock.bak
+.DS_Store
+*.swp
+.idea/
+.vscode/
+/config.local.toml
+/certs/
+node_modules/
+.claude/settings.local.json

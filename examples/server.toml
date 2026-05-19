@@ -1,0 +1,12 @@
+port = 24800
+bind = "127.0.0.1"
+psk = "test-passphrase"
+cert_dir = "/tmp/union-certs"
+clipboard_limit_bytes = 1048576
+
+[hotkey]
+cycle_forward_key = 0x4F
+cycle_backward_key = 0x50
+require_ctrl = true
+require_alt = true
+require_meta = false

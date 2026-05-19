@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Union
+GenericName=Software KVM
+Comment=Share keyboard, mouse and clipboard across machines
+Exec=/usr/bin/union-gui
+Icon=union
+Terminal=false
+Categories=Network;Utility;
+Keywords=kvm;keyboard;mouse;clipboard;remote;
+StartupNotify=true

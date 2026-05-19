@@ -1,0 +1,44 @@
+[package]
+name = "union-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Union — control panel (egui) for the Union software KVM"
+repository.workspace = true
+
+[[bin]]
+name = "union-gui"
+path = "src/main.rs"
+
+[package.metadata.deb]
+maintainer = "Union Project"
+copyright = "2026, Union Project"
+license-file = ["../../LICENSE", "0"]
+extended-description = """Graphical control panel for Union, a cross-platform \
+software KVM. Lets the user pick server/client mode, edit the config, and \
+launch the daemon as a subprocess."""
+depends = "$auto, libx11-6, libgl1"
+section = "net"
+priority = "optional"
+maintainer-scripts = "../../packaging/linux/maintainer-scripts"
+assets = [
+    ["target/release/union-gui", "usr/bin/", "755"],
+    ["../../packaging/linux/union-gui.desktop", "usr/share/applications/union-gui.desktop", "644"],
+    ["../../packaging/linux/union.svg", "usr/share/icons/hicolor/scalable/apps/union.svg", "644"],
+    ["../../README.md", "usr/share/doc/union-gui/README.md", "644"],
+]
+
+[package.metadata.wix]
+upgrade-guid = "9F7E0E3B-3A52-4D5D-9C2E-7C9C0E9A1A11"
+path-guid = "B5B3D5C7-7A1E-4F38-8E5E-1F7E8C2C8B22"
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+serde = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+protocol = { workspace = true }
+clipboard-sync = { workspace = true }

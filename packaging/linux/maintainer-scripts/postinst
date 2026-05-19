@@ -1,0 +1,28 @@
+#!/bin/sh
+# Runs as root after the .deb is unpacked.
+# We can't seed per-user config from here (no user context),
+# but we can make sure /etc/union/ is readable and refresh icon/desktop caches.
+set -e
+
+case "$1" in
+    configure)
+        # Make example configs world-readable so the systemd ExecStartPre seed step works
+        # even for users who installed the package after their account was created.
+        if [ -d /etc/union ]; then
+            chmod 0755 /etc/union
+            find /etc/union -type f -name '*.example' -exec chmod 0644 {} +
+        fi
+
+        # Refresh desktop/icon caches if the helpers are available (silent on failure).
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
